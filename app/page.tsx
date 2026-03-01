@@ -11,9 +11,9 @@ import { calculateProgress, formatCurrency, calculateTotalSpent, calculateTotalC
 
 export default function DashboardPage() {
   const projects = useProjectStore((s) => s.projects);
-  const initialized = useProjectStore((s) => s.initialized);
+  const isLoading = useProjectStore((s) => s.isLoading);
 
-  if (!initialized) {
+  if (isLoading) {
     return (
       <div className="space-y-6">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

@@ -184,14 +184,18 @@ export function ProjectComponents({ project }: Props) {
         if (over && active.id !== over.id) {
             const oldIndex = project.components.findIndex((c) => c.id === active.id);
             const newIndex = project.components.findIndex((c) => c.id === over.id);
-            const newOrder = arrayMove(project.components, oldIndex, newIndex);
-            reorderComponents(project.id, newOrder);
+            reorderComponents(project.id, oldIndex, newIndex);
         }
     };
 
     const handleAdd = () => {
         if (!newName.trim()) return;
-        addComponent(project.id, newName.trim(), newCategory, Number(newPrice) || 0);
+        addComponent(project.id, {
+            name: newName.trim(),
+            category: newCategory,
+            price: Number(newPrice) || 0,
+            status: 'planned'
+        });
         setNewName('');
         setNewPrice('');
         setNewCategory('Other');

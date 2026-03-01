@@ -28,10 +28,10 @@ export default function ProjectDetailPage() {
     const params = useParams();
     const projectId = params.id as string;
     const project = useProjectStore((s) => s.projects.find((p) => p.id === projectId));
-    const initialized = useProjectStore((s) => s.initialized);
+    const isLoading = useProjectStore((s) => s.isLoading);
     const [activeTab, setActiveTab] = useState<TabId>('overview');
 
-    if (!initialized) {
+    if (isLoading) {
         return (
             <div className="space-y-6">
                 <div className="h-12 w-48 rounded-xl bg-card border border-border animate-pulse" />

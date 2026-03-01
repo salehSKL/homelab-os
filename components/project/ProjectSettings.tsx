@@ -3,11 +3,10 @@
 import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Save, Copy, Trash2, RotateCcw, Download, Upload, AlertTriangle } from 'lucide-react';
+import { Save, Copy, Trash2, RotateCcw, AlertTriangle } from 'lucide-react';
 import type { Project, ProjectType } from '@/lib/types';
 import { useProjectStore } from '@/store/useProjectStore';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
-import { exportProjectsJSON, importProjectsJSON } from '@/lib/persistence';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -22,7 +21,6 @@ export function ProjectSettings({ project }: Props) {
     const deleteProject = useProjectStore((s) => s.deleteProject);
     const duplicateProject = useProjectStore((s) => s.duplicateProject);
     const resetProject = useProjectStore((s) => s.resetProject);
-    const importProjects = useProjectStore((s) => s.importProjects);
 
     const [name, setName] = useState(project.name);
     const [type, setType] = useState<ProjectType>(project.type);
@@ -30,7 +28,6 @@ export function ProjectSettings({ project }: Props) {
     const [saved, setSaved] = useState(false);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [resetOpen, setResetOpen] = useState(false);
-    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleSave = () => {
         updateProject(project.id, {
@@ -54,34 +51,6 @@ export function ProjectSettings({ project }: Props) {
 
     const handleReset = () => {
         resetProject(project.id);
-    };
-
-    const handleExport = () => {
-        const json = exportProjectsJSON([project]);
-        const blob = new Blob([json], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${project.name.replace(/\s+/g, '-').toLowerCase()}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-    };
-
-    const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-            const content = ev.target?.result as string;
-            const parsed = importProjectsJSON(content);
-            if (parsed) {
-                importProjects(parsed);
-            } else {
-                alert('Invalid JSON file');
-            }
-        };
-        reader.readAsText(file);
-        e.target.value = '';
     };
 
     return (
@@ -173,34 +142,7 @@ export function ProjectSettings({ project }: Props) {
                             <p className="text-xs text-muted-foreground">Reset all component statuses</p>
                         </div>
                     </button>
-
-                    <button
-                        onClick={handleExport}
-                        className="flex items-center gap-3 p-4 rounded-xl bg-secondary hover:bg-accent border border-border hover:border-emerald-500/20 transition-all text-left"
-                    >
-                        <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-emerald-500/10">
-                            <Download className="w-4 h-4 text-emerald-400" />
-                        </div>
-                        <div>
-                            <p className="text-sm font-medium text-foreground">Export JSON</p>
-                            <p className="text-xs text-muted-foreground">Download project as JSON</p>
-                        </div>
-                    </button>
-
-                    <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="flex items-center gap-3 p-4 rounded-xl bg-secondary hover:bg-accent border border-border hover:border-purple-500/20 transition-all text-left"
-                    >
-                        <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-purple-500/10">
-                            <Upload className="w-4 h-4 text-purple-400" />
-                        </div>
-                        <div>
-                            <p className="text-sm font-medium text-foreground">Import JSON</p>
-                            <p className="text-xs text-muted-foreground">Import project from JSON file</p>
-                        </div>
-                    </button>
                 </div>
-                <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
             </motion.div>
 
             {/* Danger Zone */}

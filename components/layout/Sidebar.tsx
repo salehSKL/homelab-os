@@ -10,10 +10,12 @@ import {
     Server,
     Menu,
     X,
+    LogOut,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from './ThemeToggle';
 import { useState } from 'react';
+import { useAuth } from '@/components/auth/AuthProvider';
 
 const navItems = [
     { href: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -24,6 +26,7 @@ const navItems = [
 export function Sidebar() {
     const pathname = usePathname();
     const [mobileOpen, setMobileOpen] = useState(false);
+    const { user, signOut } = useAuth();
 
     const NavContent = () => (
         <>
@@ -74,6 +77,22 @@ export function Sidebar() {
             {/* Footer */}
             <div className="px-3 py-4 mt-auto">
                 <div className="h-px bg-border mb-4" />
+
+                {user && (
+                    <div className="flex items-center justify-between px-2 mb-4">
+                        <span className="text-[13px] font-medium text-foreground truncate max-w-[140px]" title={user.email || ''}>
+                            {user.email}
+                        </span>
+                        <button
+                            onClick={() => signOut()}
+                            className="p-1.5 rounded-md hover:bg-red-500/10 hover:text-red-400 text-muted-foreground transition-colors"
+                            title="Sign out"
+                        >
+                            <LogOut className="w-4 h-4" />
+                        </button>
+                    </div>
+                )}
+
                 <div className="flex items-center justify-between">
                     <span className="text-xs text-muted-foreground">v1.0.0</span>
                     <ThemeToggle />

@@ -1,190 +1,304 @@
-'use client';
-
 import { create } from 'zustand';
-import { v4 as uuidv4 } from 'uuid';
-import type { Project, Component, ProjectType, ComponentStatus, ComponentCategory } from '@/lib/types';
-import { loadProjects, saveProjects } from '@/lib/persistence';
+import { Project, Component, ProjectType, ComponentStatus } from '@/lib/types';
+import { createClient } from '@/lib/supabase/client';
 
-interface ProjectStore {
+export interface ProjectStore {
     projects: Project[];
-    initialized: boolean;
-    initialize: () => void;
-    addProject: (name: string, type: ProjectType, budget: number) => string;
-    updateProject: (id: string, updates: Partial<Omit<Project, 'id' | 'components'>>) => void;
-    deleteProject: (id: string) => void;
-    duplicateProject: (id: string) => string | null;
-    resetProject: (id: string) => void;
-    addComponent: (projectId: string, name: string, category: ComponentCategory, price: number) => void;
-    updateComponent: (projectId: string, componentId: string, updates: Partial<Omit<Component, 'id'>>) => void;
-    deleteComponent: (projectId: string, componentId: string) => void;
-    reorderComponents: (projectId: string, components: Component[]) => void;
-    importProjects: (projects: Project[]) => void;
-    getProject: (id: string) => Project | undefined;
-}
+    isLoading: boolean;
+    error: string | null;
 
-function createSampleProject(): Project {
-    return {
-        id: uuidv4(),
-        name: 'ITX Server Build',
-        type: 'ITX',
-        budget: 3500,
-        createdAt: new Date().toISOString(),
-        components: [
-            { id: uuidv4(), name: 'Fractal Design Terra', category: 'Case', price: 150, status: 'installed' },
-            { id: uuidv4(), name: 'AMD Ryzen 9 5950X', category: 'CPU', price: 550, status: 'installed' },
-            { id: uuidv4(), name: 'ASUS ROG Strix X570-I', category: 'Motherboard', price: 280, status: 'installed' },
-            { id: uuidv4(), name: 'Noctua NH-L12S', category: 'Cooler', price: 55, status: 'delivered' },
-            { id: uuidv4(), name: 'Corsair SF750', category: 'PSU', price: 145, status: 'installed' },
-            { id: uuidv4(), name: 'Corsair Vengeance DDR4 64GB', category: 'RAM', price: 180, status: 'ordered' },
-            { id: uuidv4(), name: 'Samsung 990 PRO 2TB', category: 'Storage', price: 210, status: 'installed' },
-            { id: uuidv4(), name: 'Crucial P5 Plus 4TB', category: 'Storage', price: 320, status: 'planned' },
-            { id: uuidv4(), name: 'Noctua NF-A12x25', category: 'Fan', price: 32, status: 'delivered' },
-            { id: uuidv4(), name: 'UPS 1500VA', category: 'UPS', price: 200, status: 'planned' },
-        ],
-    };
-}
+    fetchProjects: () => Promise<void>;
 
-const persist = (projects: Project[]) => {
-    saveProjects(projects);
-};
+    addProject: (name: string, type: ProjectType, budget: number) => Promise<string | undefined>;
+    updateProject: (id: string, data: Partial<Project>) => Promise<void>;
+    deleteProject: (id: string) => Promise<void>;
+    duplicateProject: (id: string) => Promise<string | undefined>;
+    resetProject: (id: string) => Promise<void>;
+
+    addComponent: (projectId: string, component: Omit<Component, 'id'>) => Promise<void>;
+    updateComponent: (projectId: string, componentId: string, data: Partial<Component>) => Promise<void>;
+    deleteComponent: (projectId: string, componentId: string) => Promise<void>;
+    reorderComponents: (projectId: string, startIndex: number, endIndex: number) => Promise<void>;
+}
 
 export const useProjectStore = create<ProjectStore>((set, get) => ({
     projects: [],
-    initialized: false,
+    isLoading: true,
+    error: null,
 
-    initialize: () => {
-        if (get().initialized) return;
-        const saved = loadProjects();
-        if (saved && saved.length > 0) {
-            set({ projects: saved, initialized: true });
-        } else {
-            const sample = [createSampleProject()];
-            persist(sample);
-            set({ projects: sample, initialized: true });
+    fetchProjects: async () => {
+        set({ isLoading: true, error: null });
+        const supabase = createClient();
+        const { data: { session } } = await supabase.auth.getSession();
+
+        if (!session) {
+            set({ projects: [], isLoading: false });
+            return;
+        }
+
+        // Fetch projects and components in one query using postgrest relation
+        const { data, error } = await supabase
+            .from('projects')
+            .select(`
+        *,
+        components (*)
+      `)
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            set({ error: error.message, isLoading: false });
+            return;
+        }
+
+        // Map the database rows back to our Frontend Project types
+        const typedProjects: Project[] = (data || []).map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            type: p.type as ProjectType,
+            budget: Number(p.budget),
+            createdAt: p.created_at,
+            components: (p.components || []).map((c: any) => ({
+                id: c.id,
+                name: c.name,
+                price: Number(c.price),
+                status: c.status as ComponentStatus,
+                category: c.category,
+            })),
+        }));
+
+        set({ projects: typedProjects, isLoading: false });
+    },
+
+    addProject: async (name, type, budget) => {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data, error } = await supabase
+            .from('projects')
+            .insert({
+                user_id: user.id,
+                name,
+                type,
+                budget,
+            })
+            .select()
+            .single();
+
+        if (error) {
+            set({ error: error.message });
+            return;
+        }
+
+        const newProject: Project = {
+            id: data.id,
+            name: data.name,
+            type: data.type as ProjectType,
+            budget: Number(data.budget),
+            createdAt: data.created_at,
+            components: [],
+        };
+
+        set((state) => ({ projects: [newProject, ...state.projects] }));
+        return data.id;
+    },
+
+    updateProject: async (id, data) => {
+        const supabase = createClient();
+
+        // Update local state first (Optimistic)
+        set((state) => ({
+            projects: state.projects.map((p) => (p.id === id ? { ...p, ...data } : p)),
+        }));
+
+        // Update DB
+        const updatePayload: any = {};
+        if (data.name !== undefined) updatePayload.name = data.name;
+        if (data.type !== undefined) updatePayload.type = data.type;
+        if (data.budget !== undefined) updatePayload.budget = data.budget;
+
+        const { error } = await supabase.from('projects').update(updatePayload).eq('id', id);
+        if (error) {
+            // If error, rollback by re-fetching
+            await get().fetchProjects();
+            set({ error: error.message });
         }
     },
 
-    addProject: (name, type, budget) => {
-        const id = uuidv4();
-        const newProject: Project = {
-            id,
-            name,
-            type,
-            budget,
-            createdAt: new Date().toISOString(),
-            components: [],
-        };
-        set((state) => {
-            const updated = [...state.projects, newProject];
-            persist(updated);
-            return { projects: updated };
-        });
-        return id;
+    deleteProject: async (id) => {
+        const supabase = createClient();
+
+        // Optimistic
+        set((state) => ({
+            projects: state.projects.filter((p) => p.id !== id),
+        }));
+
+        const { error } = await supabase.from('projects').delete().eq('id', id);
+        if (error) {
+            await get().fetchProjects();
+            set({ error: error.message });
+        }
     },
 
-    updateProject: (id, updates) => {
-        set((state) => {
-            const updated = state.projects.map((p) => (p.id === id ? { ...p, ...updates } : p));
-            persist(updated);
-            return { projects: updated };
-        });
+    duplicateProject: async (id) => {
+        const supabase = createClient();
+        const state = get();
+        const projectToDuplicate = state.projects.find((p) => p.id === id);
+        if (!projectToDuplicate) return;
+
+        // Create new project in DB
+        const newProjectId = await state.addProject(
+            `${projectToDuplicate.name} (Copy)`,
+            projectToDuplicate.type,
+            projectToDuplicate.budget
+        );
+
+        if (!newProjectId) return;
+
+        // Copy components
+        if (projectToDuplicate.components.length > 0) {
+            const componentsToInsert = projectToDuplicate.components.map(c => ({
+                project_id: newProjectId,
+                name: c.name,
+                category: c.category,
+                price: c.price,
+                status: 'planned' // Reset status on duplicate
+            }));
+
+            const { error } = await supabase.from('components').insert(componentsToInsert);
+
+            if (!error) {
+                // Reload to get components
+                await state.fetchProjects();
+            } else {
+                set({ error: error.message });
+            }
+        }
+
+        return newProjectId;
     },
 
-    deleteProject: (id) => {
-        set((state) => {
-            const updated = state.projects.filter((p) => p.id !== id);
-            persist(updated);
-            return { projects: updated };
-        });
+    resetProject: async (id) => {
+        const supabase = createClient();
+
+        // Optimistic update
+        set((state) => ({
+            projects: state.projects.map((p) => {
+                if (p.id !== id) return p;
+                return {
+                    ...p,
+                    components: p.components.map((c) => ({ ...c, status: 'planned' as ComponentStatus })),
+                };
+            }),
+        }));
+
+        // Update all components for this project in DB
+        const { error } = await supabase
+            .from('components')
+            .update({ status: 'planned' })
+            .eq('project_id', id);
+
+        if (error) {
+            await get().fetchProjects();
+            set({ error: error.message });
+        }
     },
 
-    duplicateProject: (id) => {
-        const project = get().projects.find((p) => p.id === id);
-        if (!project) return null;
-        const newId = uuidv4();
-        const duplicate: Project = {
-            ...project,
-            id: newId,
-            name: `${project.name} (Copy)`,
-            createdAt: new Date().toISOString(),
-            components: project.components.map((c) => ({ ...c, id: uuidv4() })),
-        };
-        set((state) => {
-            const updated = [...state.projects, duplicate];
-            persist(updated);
-            return { projects: updated };
-        });
-        return newId;
-    },
+    addComponent: async (projectId, componentData) => {
+        const supabase = createClient();
 
-    resetProject: (id) => {
-        set((state) => {
-            const updated = state.projects.map((p) =>
-                p.id === id
-                    ? { ...p, components: p.components.map((c) => ({ ...c, status: 'planned' as ComponentStatus })) }
-                    : p
-            );
-            persist(updated);
-            return { projects: updated };
-        });
-    },
+        const { data, error } = await supabase
+            .from('components')
+            .insert({
+                project_id: projectId,
+                name: componentData.name,
+                category: componentData.category,
+                price: componentData.price,
+                status: componentData.status,
+            })
+            .select()
+            .single();
 
-    addComponent: (projectId, name, category, price) => {
+        if (error) {
+            set({ error: error.message });
+            return;
+        }
+
         const newComponent: Component = {
-            id: uuidv4(),
-            name,
-            category,
-            price,
-            status: 'planned',
+            id: data.id,
+            name: data.name,
+            category: data.category,
+            price: Number(data.price),
+            status: data.status as ComponentStatus,
         };
-        set((state) => {
-            const updated = state.projects.map((p) =>
-                p.id === projectId ? { ...p, components: [...p.components, newComponent] } : p
-            );
-            persist(updated);
-            return { projects: updated };
-        });
+
+        set((state) => ({
+            projects: state.projects.map((p) => {
+                if (p.id !== projectId) return p;
+                return { ...p, components: [...p.components, newComponent] };
+            }),
+        }));
     },
 
-    updateComponent: (projectId, componentId, updates) => {
-        set((state) => {
-            const updated = state.projects.map((p) =>
-                p.id === projectId
-                    ? { ...p, components: p.components.map((c) => (c.id === componentId ? { ...c, ...updates } : c)) }
-                    : p
-            );
-            persist(updated);
-            return { projects: updated };
-        });
+    updateComponent: async (projectId, componentId, data) => {
+        const supabase = createClient();
+
+        // Optimistic
+        set((state) => ({
+            projects: state.projects.map((p) => {
+                if (p.id !== projectId) return p;
+                return {
+                    ...p,
+                    components: p.components.map((c) => (c.id === componentId ? { ...c, ...data } : c)),
+                };
+            }),
+        }));
+
+        const updatePayload: any = {};
+        if (data.name !== undefined) updatePayload.name = data.name;
+        if (data.category !== undefined) updatePayload.category = data.category;
+        if (data.price !== undefined) updatePayload.price = data.price;
+        if (data.status !== undefined) updatePayload.status = data.status;
+
+        const { error } = await supabase.from('components').update(updatePayload).eq('id', componentId);
+
+        if (error) {
+            await get().fetchProjects();
+            set({ error: error.message });
+        }
     },
 
-    deleteComponent: (projectId, componentId) => {
-        set((state) => {
-            const updated = state.projects.map((p) =>
-                p.id === projectId ? { ...p, components: p.components.filter((c) => c.id !== componentId) } : p
-            );
-            persist(updated);
-            return { projects: updated };
-        });
+    deleteComponent: async (projectId, componentId) => {
+        const supabase = createClient();
+
+        // Optimistic
+        set((state) => ({
+            projects: state.projects.map((p) => {
+                if (p.id !== projectId) return p;
+                return { ...p, components: p.components.filter((c) => c.id !== componentId) };
+            }),
+        }));
+
+        const { error } = await supabase.from('components').delete().eq('id', componentId);
+
+        if (error) {
+            await get().fetchProjects();
+            set({ error: error.message });
+        }
     },
 
-    reorderComponents: (projectId, components) => {
-        set((state) => {
-            const updated = state.projects.map((p) => (p.id === projectId ? { ...p, components } : p));
-            persist(updated);
-            return { projects: updated };
-        });
-    },
+    reorderComponents: async (projectId, startIndex, endIndex) => {
+        // Reordering is purely frontend UX for now unless we add an 'order_index' column to the DB
+        // For this exact implementation we will just stick it in local state.
+        set((state) => ({
+            projects: state.projects.map((p) => {
+                if (p.id !== projectId) return p;
+                const result = Array.from(p.components);
+                const [removed] = result.splice(startIndex, 1);
+                result.splice(endIndex, 0, removed);
+                return { ...p, components: result };
+            }),
+        }));
+    }
 
-    importProjects: (projects) => {
-        set((state) => {
-            const updated = [...state.projects, ...projects.map((p) => ({ ...p, id: uuidv4() }))];
-            persist(updated);
-            return { projects: updated };
-        });
-    },
-
-    getProject: (id) => {
-        return get().projects.find((p) => p.id === id);
-    },
 }));

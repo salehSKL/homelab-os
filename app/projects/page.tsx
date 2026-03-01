@@ -9,9 +9,9 @@ import Link from 'next/link';
 
 export default function ProjectsPage() {
     const projects = useProjectStore((s) => s.projects);
-    const initialized = useProjectStore((s) => s.initialized);
+    const isLoading = useProjectStore((s) => s.isLoading);
 
-    if (!initialized) {
+    if (isLoading) {
         return (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mt-8">
                 {[...Array(6)].map((_, i) => (
